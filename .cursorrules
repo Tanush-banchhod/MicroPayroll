@@ -1,0 +1,472 @@
+# MicroPayroll — Project Memory Graph for AI-Assisted Development
+
+> **Purpose:** This document is the single source of truth for any AI model (Cursor, Claude, GPT) helping build MicroPayroll. Read this fully before writing any code. It contains the problem, the vision, all technical decisions, phase-wise roadmap, and constraints.
+
+---
+
+## 1. The Problem (Why This Exists)
+
+Businesses with **fewer than 10 employees** spend 3–6 hours every month manually calculating salaries in Excel or notebooks.
+
+The pain is real and specific:
+- Variable pay every month: overtime days, unpaid leave, festival bonuses (Diwali, Eid, etc.)
+- No existing payroll software serves this segment — all tools are built for 50+ employee companies
+- Manual calculation leads to arithmetic errors, employee disputes, and compliance gaps
+- The owner (e.g. a garment shop owner in Mumbai) has no time, no accountant, and no patience for complex software
+
+**The job to be done:** "I need to pay my 7 employees correctly, by Friday, without spending a Sunday night on it."
+
+---
+
+## 2. The Solution
+
+An **open-source, self-hostable payroll tool** for micro-businesses (2–10 employees) that:
+
+1. Automates attendance tracking via **WhatsApp selfie check-in** (v1) and **QR code scan** (v2)
+2. Auto-calculates salary from attendance data — overtime, unpaid leave, festival bonuses
+3. Generates professional **payslip PDFs**
+4. Exports a **bank-ready CSV** for NEFT bulk transfer
+5. Handles Indian compliance: **PF (12%), ESIC (0.75% employee / 3.25% employer), Professional Tax** (state-wise)
+6. Sends payslip to employee via **WhatsApp or email**
+
+**This is open-source and free.** Monetisation later via cloud-hosted managed version (open-core model).
+
+---
+
+## 3. Real-World Reference Example
+
+**Company:** Sharma Garments, Mumbai (10 employees)
+**Owner:** Suresh Sharma — runs the shop, not tech-savvy
+
+### Employee roster used in design:
+| Name | Role | Base Salary |
+|---|---|---|
+| Ramesh Yadav | Senior Tailor | ₹18,000 |
+| Sunita Patil | Tailor | ₹14,000 |
+| Arun Mishra | Tailor | ₹14,000 |
+| Meena Devi | Finisher | ₹11,000 |
+| Raju Sharma | Cutter | ₹16,000 |
+| Priya Joshi | Quality Checker | ₹13,000 |
+| Deepak Verma | Packer | ₹10,000 |
+| Laxmi Bai | Helper | ₹9,000 |
+| Sanjay Kumar | Store Keeper | ₹12,000 |
+| Kavya Nair | Accountant | ₹20,000 |
+
+### Salary calculation rules (baked into engine):
+- **Daily rate** = Base salary ÷ 26 working days
+- **Overtime pay** = Overtime days × Daily rate × 2 (double pay)
+- **Unpaid leave deduction** = Leave days × Daily rate
+- **Festival bonus** = 8.33% of monthly basic (toggle per employee)
+- **PF employee deduction** = 12% of basic
+- **ESIC employee deduction** = 0.75% of gross (if salary ≤ ₹21,000)
+- **Professional Tax** = Slab-based, Maharashtra = ₹200/month above ₹10,000
+- **Employer PF** = 12% of basic (shown separately, not deducted)
+- **Employer ESIC** = 3.25% of gross
+
+---
+
+## 4. Tech Stack (Decided — Do Not Change Without Strong Reason)
+
+### Backend
+- **Language:** Python 3.11+
+- **Framework:** FastAPI (async, auto OpenAPI docs)
+- **Task Queue:** Celery + Redis (for scheduled payroll runs, WhatsApp message sending)
+- **ORM:** SQLAlchemy 2.0 + Alembic (migrations)
+- **Database:** PostgreSQL 15
+- **PDF generation:** WeasyPrint or ReportLab
+- **Face recognition:** `face_recognition` library (wraps dlib) — stores 128-d encodings, NOT photos
+
+### Frontend
+- **Framework:** Next.js 14 (App Router) + TypeScript
+- **Styling:** Tailwind CSS + shadcn/ui components
+- **PWA:** Yes — must work on mobile browser, offline-capable for viewing payslips
+
+### WhatsApp Integration
+- **Provider:** Meta WhatsApp Business API (Cloud API — free tier: 1,000 conversations/month)
+- **Webhook handler:** FastAPI endpoint receives POST from Meta
+- **Bot reply:** Uses `httpx` to call WhatsApp send message API
+
+### Infrastructure
+- **Containerisation:** Docker + Docker Compose (single `docker-compose up` to run everything)
+- **Reverse proxy:** Nginx
+- **CI/CD:** GitHub Actions
+- **Self-host target:** ₹500/month VPS (2GB RAM, Ubuntu 24)
+- **Optional managed deploy:** Railway or Render
+
+### Repo structure:
+```
+micropayroll/
+├── engine/          # Pure Python package — zero web dependencies
+│   ├── salary.py    # Core calculation logic
+│   ├── compliance/  # PF, ESIC, PT rules
+│   └── rules/       # YAML config files per state/country
+├── api/             # FastAPI application
+│   ├── routers/     # attendance, payroll, employees, webhooks
+│   ├── models/      # SQLAlchemy models
+│   └── services/    # WhatsApp, PDF, email services
+├── web/             # Next.js frontend
+├── rules/           # YAML compliance rules (india-maharashtra.yaml etc.)
+├── docker-compose.yml
+└── docs/
+```
+
+---
+
+## 5. WhatsApp Selfie Check-In — Full Technical Flow
+
+This is the **core v1 feature**. Understand it deeply.
+
+### Flow:
+1. Employee (Ramesh) sends a selfie photo to the shop's WhatsApp Business number
+2. Meta webhook fires a POST to `POST /api/webhooks/whatsapp`
+3. Server downloads the image from Meta's media URL
+4. **Phone number lookup:** maps sender's WhatsApp number to employee record in DB
+5. **Face match:** compare incoming selfie encoding vs stored encoding (128-d vector, dlib)
+6. **Checks run in order:**
+   - Face match confidence ≥ threshold (0.6 default)? If no → alert owner, reply "Face not recognised"
+   - Already checked in today? If yes → reply "Already checked in at HH:MM"
+   - Is it within valid shift window? (configurable per shop, e.g. 8AM–10AM for check-in)
+7. If all pass → write `AttendanceLog` record: `{employee_id, date, punch_in: timestamp, status: "present"}`
+8. Bot replies: "Good morning Ramesh! ✅ Check-in at 9:03 AM recorded."
+
+### Check-out flow (same pattern):
+1. Selfie sent in evening
+2. Same face match + phone lookup
+3. System checks if punch-in exists today
+4. Writes `punch_out` timestamp
+5. Calculates hours worked: `punch_out - punch_in`
+6. If hours > standard shift (e.g. 8h) → flags overtime, calculates OT hours
+7. Replies: "Check-out at 7:14 PM. Today: 10h 11m. Overtime: 2h 11m flagged ⏱️"
+
+### Owner daily summary (automated, sent at shift end + 15 mins):
+- Celery scheduled task fires
+- Queries all employees for today
+- Sends summary to owner's WhatsApp: present list, absent list, overtime flags
+
+### Edge cases to handle:
+- **Photo-of-photo spoofing:** Check image metadata, optionally implement "send selfie with today's date slip" challenge
+- **Poor lighting:** Check image brightness before face match; reply "Please step into better light and resend"
+- **No checkout received:** After shift end window closes, auto-mark as full-day present, flag for review
+- **First-time setup:** Owner sends a setup selfie per employee during onboarding to register face encoding
+
+### Face encoding storage:
+- Store as `ARRAY(Float)` of length 128 in PostgreSQL
+- Never store the raw image — discard after encoding extraction
+- Privacy-compliant: encoding cannot be reverse-engineered to face photo
+
+---
+
+## 6. Database Schema (Core Tables)
+
+```sql
+-- Companies (multi-tenant from day 1)
+companies (id, name, address, gstin, state, whatsapp_number, owner_phone, created_at)
+
+-- Employees
+employees (id, company_id, name, role, base_salary, phone_number, bank_account,
+           pf_account, face_encoding FLOAT[], is_active, joined_at)
+
+-- Attendance logs
+attendance_logs (id, employee_id, date, punch_in TIMESTAMPTZ, punch_out TIMESTAMPTZ,
+                 hours_worked FLOAT, overtime_hours FLOAT, status ENUM, source ENUM, created_at)
+-- status: present | absent | half_day | holiday
+-- source: whatsapp | qr_code | manual
+
+-- Payroll runs
+payroll_runs (id, company_id, month, year, status ENUM, total_payout, run_at, created_by)
+-- status: draft | approved | paid
+
+-- Payroll line items (one per employee per run)
+payroll_line_items (id, run_id, employee_id, basic, overtime_pay, leave_deduction,
+                    festival_bonus, gross, pf_employee, esic_employee, professional_tax,
+                    total_deductions, net_pay, snapshot JSONB)
+-- snapshot = full calculation breakdown stored as JSON for audit trail
+
+-- Compliance config
+compliance_rules (id, company_id, state, rule_type, config JSONB)
+```
+
+---
+
+## 7. Payroll Engine API (engine/ package)
+
+The engine is a **pure Python package** with zero web dependencies. It must be independently testable.
+
+```python
+# engine/salary.py — core interface
+
+from dataclasses import dataclass
+
+@dataclass
+class EmployeeInput:
+    employee_id: str
+    base_salary: float
+    working_days: int          # days present (from attendance)
+    overtime_hours: float      # total OT hours this month
+    unpaid_leave_days: int
+    festival_bonus: bool
+    state: str                 # for professional tax slab lookup
+
+@dataclass
+class PayrollResult:
+    basic: float
+    overtime_pay: float
+    leave_deduction: float
+    festival_bonus: float
+    gross: float
+    pf_employee: float
+    esic_employee: float
+    professional_tax: float
+    total_deductions: float
+    net_pay: float
+    employer_pf: float
+    employer_esic: float
+    cost_to_company: float
+    breakdown: dict            # full audit trail
+
+def calculate(input: EmployeeInput, rules: ComplianceRules) -> PayrollResult:
+    ...
+```
+
+**Key calculation constants:**
+- Standard working days per month: 26
+- OT multiplier: 2× daily rate per OT day (configurable)
+- Festival bonus: 8.33% of basic (1/12th of annual bonus = statutory minimum)
+- PF threshold: applicable on salary ≤ ₹15,000 basic (statutory), but applied to full basic here
+- ESIC threshold: applicable if gross ≤ ₹21,000/month
+
+---
+
+## 8. Phase-Wise Build Roadmap
+
+### Phase 1 — Core Payroll Engine (Weeks 1–2)
+**Goal:** Be able to calculate correct salary for any employee with variable inputs.
+
+Tasks:
+- [ ] Set up repo structure, Docker Compose (FastAPI + PostgreSQL + Redis)
+- [ ] Create all DB models + Alembic migrations
+- [ ] Build `engine/salary.py` — full calculation with all components
+- [ ] Build `engine/compliance/india.py` — PF, ESIC, Professional Tax rules
+- [ ] Write YAML rule files for Maharashtra, Karnataka, Delhi
+- [ ] Unit test engine with 20+ test cases (edge cases: ESIC threshold, OT = 0, no bonus, etc.)
+- [ ] `POST /api/payroll/calculate` — accepts employee inputs, returns breakdown
+
+**Done when:** Running `pytest engine/` passes 100%. You can POST employee data and get correct net pay back.
+
+---
+
+### Phase 2 — Employee Management + Manual Attendance (Weeks 3–4)
+**Goal:** Owner can set up employees and manually mark attendance via web UI.
+
+Tasks:
+- [ ] `POST /api/companies` — create company
+- [ ] `POST /api/employees` — add employee (name, role, base salary, phone, bank)
+- [ ] `GET /api/employees` — list all
+- [ ] `POST /api/attendance/manual` — owner marks attendance for date + employee
+- [ ] `GET /api/attendance/{month}` — monthly view
+- [ ] Next.js web app: employee list page, attendance grid (calendar view per employee)
+- [ ] shadcn/ui data table for employee management
+- [ ] Run payroll manually: select month → review auto-calculated salaries → approve
+
+**Done when:** Suresh can add 10 employees and manually run payroll for November. Correct net pay shown.
+
+---
+
+### Phase 3 — Payslip PDF + Bank Export (Week 5)
+**Goal:** Generate professional payslip PDF and NEFT-ready CSV.
+
+Tasks:
+- [ ] Design payslip HTML template (WeasyPrint renders HTML→PDF)
+- [ ] Payslip sections: company header, employee info, earnings table, deductions table, employer contributions, net pay in words, compliance footer
+- [ ] `GET /api/payroll/{run_id}/payslip/{employee_id}` → returns PDF
+- [ ] `GET /api/payroll/{run_id}/bank-export` → returns CSV
+- [ ] Bank CSV format: `Employee Name, Account Number, IFSC, Amount, Remarks`
+- [ ] Payslip PDF sent via email (SendGrid free tier) or WhatsApp
+
+**Done when:** A payslip PDF for Ramesh matches the design spec exactly. Bank CSV opens in Excel with correct columns.
+
+---
+
+### Phase 4 — WhatsApp Bot + Face Check-In (Weeks 6–8)
+**Goal:** Zero manual attendance marking — employees check in via WhatsApp selfie.
+
+Tasks:
+- [ ] Set up Meta WhatsApp Business API, get webhook URL verified
+- [ ] `POST /api/webhooks/whatsapp` — webhook receiver
+- [ ] Download image from Meta media URL → extract face encoding (`face_recognition`)
+- [ ] Employee onboarding flow: owner sends "register [employee_name]" → bot guides face photo upload
+- [ ] Store face encoding in `employees.face_encoding`
+- [ ] Check-in flow: face match → time window check → duplicate check → write AttendanceLog
+- [ ] Check-out flow: same face match → calculate hours → flag OT
+- [ ] Poor lighting detection: check mean pixel brightness, reply with helpful message
+- [ ] Daily summary Celery task → WhatsApp message to owner at 8PM
+- [ ] `GET /api/attendance/today` → dashboard view showing live check-in status
+
+**Done when:** Ramesh sends a selfie on WhatsApp. System correctly logs check-in. Owner receives daily summary. Payroll for the month auto-populates from attendance.
+
+---
+
+### Phase 5 — Dashboard + Polish (Week 9–10)
+**Goal:** Clean owner-facing dashboard. Production-ready.
+
+Tasks:
+- [ ] Dashboard: total payout this month, attendance rate, pending approvals, overtime alerts
+- [ ] Attendance heatmap (employee × day grid, colour-coded)
+- [ ] Payroll run history with audit trail
+- [ ] Employee self-service: employee can WhatsApp "myslip" to get their payslip PDF
+- [ ] Multi-company support (one deployment, multiple shops)
+- [ ] README with one-command Docker setup
+- [ ] GitHub Actions: lint + test on every PR
+
+**Done when:** A non-technical person can run `docker-compose up` and set up their company in under 10 minutes.
+
+---
+
+### Phase 6 (v2) — QR Code Attendance
+**Goal:** Add QR as a second attendance method. No new backend logic — just a new source.
+
+Tasks:
+- [ ] Generate unique daily QR per employee (URL: `/checkin?emp=EMP001&token=DAILY_HASH&date=20241104`)
+- [ ] Daily token = HMAC(employee_id + date, secret_key) — expires at midnight
+- [ ] `GET /checkin` → mobile-friendly page → records GPS + timestamp → writes AttendanceLog with `source=qr_code`
+- [ ] Morning WhatsApp blast: send each employee their daily QR image
+- [ ] Owner can view check-in source (WhatsApp vs QR) in attendance log
+
+---
+
+## 9. API Endpoint Map (Full)
+
+```
+POST   /api/auth/login
+POST   /api/auth/refresh
+
+POST   /api/companies
+GET    /api/companies/me
+
+POST   /api/employees
+GET    /api/employees
+GET    /api/employees/{id}
+PATCH  /api/employees/{id}
+DELETE /api/employees/{id}
+POST   /api/employees/{id}/register-face   ← onboarding face photo
+
+POST   /api/attendance/manual
+GET    /api/attendance/{year}/{month}       ← full monthly grid
+GET    /api/attendance/today               ← live check-in status
+
+POST   /api/payroll/calculate              ← preview, no DB write
+POST   /api/payroll/runs                   ← create draft run
+GET    /api/payroll/runs
+GET    /api/payroll/runs/{id}
+PATCH  /api/payroll/runs/{id}/approve
+GET    /api/payroll/runs/{id}/payslip/{employee_id}   ← PDF
+GET    /api/payroll/runs/{id}/bank-export             ← CSV
+
+POST   /api/webhooks/whatsapp              ← Meta webhook (public, verified)
+GET    /api/webhooks/whatsapp              ← Meta webhook verification challenge
+```
+
+---
+
+## 10. Compliance Rules — YAML Format
+
+```yaml
+# rules/india-maharashtra.yaml
+state: Maharashtra
+country: India
+currency: INR
+working_days_per_month: 26
+overtime_multiplier: 2.0
+
+provident_fund:
+  employee_rate: 0.12
+  employer_rate: 0.12
+  wage_ceiling: 15000        # PF calculated on min(basic, 15000)
+  applicable_if_basic_lte: null  # null = always apply
+
+esic:
+  employee_rate: 0.0075
+  employer_rate: 0.0325
+  applicable_if_gross_lte: 21000
+
+professional_tax:
+  slabs:
+    - max_salary: 10000
+      monthly_tax: 0
+    - max_salary: 15000
+      monthly_tax: 150
+    - max_salary: 999999
+      monthly_tax: 200
+
+festival_bonus:
+  rate: 0.0833              # 8.33% = 1 month / 12 months
+  name: "Festival Bonus"
+```
+
+---
+
+## 11. Key Design Decisions & Constraints
+
+| Decision | Reasoning |
+|---|---|
+| Python for engine | Owner is a Python/FastAPI engineer. Easier to maintain and test. |
+| WhatsApp first | Every Indian micro-business uses WhatsApp. Zero new app install. |
+| Face encoding not photo | Privacy. Can't reverse-engineer a face from a 128-float vector. |
+| YAML for compliance rules | Non-developers (CAs, HR consultants) can contribute new state rules without touching Python. |
+| JSONB snapshot on payroll line | Audit trail. Even if rules change, old payslips show what was calculated and why. |
+| Docker Compose self-host | Primary distribution method. Works on ₹500/month VPS. |
+| 26 working days default | Standard Indian payroll convention. Configurable per company. |
+| Multi-tenant from day 1 | One deployment, multiple shop owners. Easier to offer managed SaaS later. |
+
+---
+
+## 12. What This Is NOT
+
+- Not an HR system (no leave approval workflows, no performance reviews)
+- Not an accounting system (no GST filing, no P&L)
+- Not for companies > 20 employees (keep it focused)
+- Not a replacement for a CA (compliance rules are guidelines, not legal advice)
+
+---
+
+## 13. Open Source Strategy
+
+- **License:** MIT (maximum adoption)
+- **Target contributors:** Python developers, CA firms, HR software consultants, developers in Tier 2 Indian cities
+- **Contribution hooks:** Adding a new state's compliance YAML requires zero Python knowledge
+- **Future monetisation:** Cloud-hosted version at ₹299–499/month flat fee, auto-compliance updates, WhatsApp number included
+
+---
+
+## 14. Environment Variables Needed
+
+```env
+# Database
+DATABASE_URL=postgresql+asyncpg://user:pass@localhost:5432/micropayroll
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# WhatsApp Business API
+WHATSAPP_ACCESS_TOKEN=
+WHATSAPP_PHONE_NUMBER_ID=
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=   # your chosen secret for webhook verification
+WHATSAPP_BUSINESS_ACCOUNT_ID=
+
+# App
+SECRET_KEY=                      # JWT signing key
+FACE_MATCH_THRESHOLD=0.6         # lower = stricter face matching
+SHIFT_START_WINDOW_HOURS=2       # allow check-in 2hrs around shift start
+STANDARD_SHIFT_HOURS=8
+
+# Email (optional)
+SENDGRID_API_KEY=
+
+# Storage (for temporary image processing only — images deleted after encoding)
+TEMP_IMAGE_DIR=/tmp/micropayroll
+```
+
+---
+
+*Generated from a full product design session. Last updated: November 2024.*
+*Build sequence: Phase 1 → 2 → 3 → 4 → 5 → 6(v2). Do not skip phases.*

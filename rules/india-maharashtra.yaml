@@ -1,0 +1,31 @@
+state: Maharashtra
+country: India
+currency: INR
+working_days_per_month: 26
+overtime_multiplier: 2.0
+standard_shift_hours: 8.0
+
+provident_fund:
+  employee_rate: 0.12
+  employer_rate: 0.12
+  wage_ceiling: 15000          # PF is computed on min(basic, 15000) per EPFO
+  applicable_if_basic_lte: null  # null = always apply PF
+
+esic:
+  employee_rate: 0.0075
+  employer_rate: 0.0325
+  applicable_if_gross_lte: 21000   # ESIC not applicable above ₹21,000 gross
+
+professional_tax:
+  # Maharashtra PT slabs (monthly). Effective FY 2023-24.
+  slabs:
+    - max_salary: 10000
+      monthly_tax: 0
+    - max_salary: 15000
+      monthly_tax: 150
+    - max_salary: 999999
+      monthly_tax: 200
+
+festival_bonus:
+  rate: 0.0833              # 8.33% = 1/12 of annual bonus (statutory minimum)
+  name: "Festival Bonus"

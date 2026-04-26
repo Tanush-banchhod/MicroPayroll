@@ -1,0 +1,27 @@
+state: Delhi
+country: India
+currency: INR
+working_days_per_month: 26
+overtime_multiplier: 2.0
+standard_shift_hours: 8.0
+
+provident_fund:
+  employee_rate: 0.12
+  employer_rate: 0.12
+  wage_ceiling: 15000
+  applicable_if_basic_lte: null
+
+esic:
+  employee_rate: 0.0075
+  employer_rate: 0.0325
+  applicable_if_gross_lte: 21000
+
+professional_tax:
+  # Delhi does NOT levy Professional Tax (no PT law enacted).
+  slabs:
+    - max_salary: 999999
+      monthly_tax: 0
+
+festival_bonus:
+  rate: 0.0833
+  name: "Festival Bonus"
