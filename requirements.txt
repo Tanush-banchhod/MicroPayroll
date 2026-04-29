@@ -8,6 +8,7 @@ sqlalchemy==2.0.30
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
 alembic==1.13.1
+greenlet==3.0.3
 
 # Task queue
 celery==5.4.0

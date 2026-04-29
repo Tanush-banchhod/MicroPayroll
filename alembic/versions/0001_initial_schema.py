@@ -54,15 +54,6 @@ def upgrade() -> None:
     )
 
     # ── attendance_logs ────────────────────────────────────────────────────────
-    attendance_status = postgresql.ENUM(
-        "present", "absent", "half_day", "holiday", name="attendance_status"
-    )
-    attendance_source = postgresql.ENUM(
-        "whatsapp", "qr_code", "manual", name="attendance_source"
-    )
-    attendance_status.create(op.get_bind())
-    attendance_source.create(op.get_bind())
-
     op.create_table(
         "attendance_logs",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -77,18 +68,22 @@ def upgrade() -> None:
         sa.Column("punch_out", sa.DateTime(timezone=True)),
         sa.Column("hours_worked", sa.Float),
         sa.Column("overtime_hours", sa.Float, server_default="0"),
-        sa.Column("status", sa.Enum("present", "absent", "half_day", "holiday", name="attendance_status"), nullable=False),
-        sa.Column("source", sa.Enum("whatsapp", "qr_code", "manual", name="attendance_source"), nullable=False, server_default="manual"),
+        sa.Column(
+            "status",
+            sa.Enum("present", "absent", "half_day", "holiday", name="attendance_status"),
+            nullable=False,
+        ),
+        sa.Column(
+            "source",
+            sa.Enum("whatsapp", "qr_code", "manual", name="attendance_source"),
+            nullable=False,
+            server_default="manual",
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
     op.create_index("ix_attendance_employee_date", "attendance_logs", ["employee_id", "date"])
 
     # ── payroll_runs ───────────────────────────────────────────────────────────
-    payroll_run_status = postgresql.ENUM(
-        "draft", "approved", "paid", name="payroll_run_status"
-    )
-    payroll_run_status.create(op.get_bind())
-
     op.create_table(
         "payroll_runs",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
@@ -100,7 +95,12 @@ def upgrade() -> None:
         ),
         sa.Column("month", sa.Integer, nullable=False),
         sa.Column("year", sa.Integer, nullable=False),
-        sa.Column("status", sa.Enum("draft", "approved", "paid", name="payroll_run_status"), nullable=False, server_default="draft"),
+        sa.Column(
+            "status",
+            sa.Enum("draft", "approved", "paid", name="payroll_run_status"),
+            nullable=False,
+            server_default="draft",
+        ),
         sa.Column("total_payout", sa.Float),
         sa.Column("run_at", sa.DateTime(timezone=True)),
         sa.Column("created_by", sa.String(255)),
@@ -164,4 +164,4 @@ def downgrade() -> None:
     op.drop_table("companies")
 
     for name in ("payroll_run_status", "attendance_source", "attendance_status"):
-        postgresql.ENUM(name=name).drop(op.get_bind())
+        sa.Enum(name=name).drop(op.get_bind(), checkfirst=True)
