@@ -29,3 +29,4 @@ professional_tax:
 festival_bonus:
   rate: 0.0833              # 8.33% = 1/12 of annual bonus (statutory minimum)
   name: "Festival Bonus"
+
