@@ -71,5 +71,17 @@ services:
       - ./rules:/app/rules
     command: celery -A api.worker worker --loglevel=info
 
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
