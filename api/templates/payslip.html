@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Payslip — {{ employee.name }} — {{ month_name }} {{ year }}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      font-size: 12px;
+      color: #1a1a2e;
+      background: #fff;
+      padding: 32px;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      padding-bottom: 20px;
+      border-bottom: 3px solid #4f46e5;
+      margin-bottom: 24px;
+    }
+    .company-block h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #4f46e5;
+      letter-spacing: -0.3px;
+    }
+    .company-block p {
+      font-size: 11px;
+      color: #64748b;
+      margin-top: 3px;
+      line-height: 1.5;
+    }
+    .payslip-badge {
+      text-align: right;
+    }
+    .payslip-badge .label {
+      font-size: 18px;
+      font-weight: 700;
+      color: #1e293b;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+    }
+    .payslip-badge .period {
+      font-size: 13px;
+      font-weight: 600;
+      color: #4f46e5;
+      margin-top: 4px;
+    }
+    .payslip-badge .run-info {
+      font-size: 10px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    /* ── Employee info card ──────────────────────────────────────────────── */
+    .employee-card {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px 20px;
+      display: flex;
+      gap: 40px;
+      margin-bottom: 24px;
+    }
+    .info-group { flex: 1; }
+    .info-group .field-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+      margin-bottom: 3px;
+    }
+    .info-group .field-value {
+      font-size: 13px;
+      font-weight: 500;
+      color: #1e293b;
+    }
+    .info-group + .info-group {
+      border-left: 1px solid #e2e8f0;
+      padding-left: 20px;
+    }
+
+    /* ── Tables ─────────────────────────────────────────────────────────── */
+    .tables-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .table-block { flex: 1; }
+    .table-block h3 {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #64748b;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    td {
+      padding: 6px 0;
+      font-size: 12px;
+      vertical-align: middle;
+    }
+    td:last-child { text-align: right; font-weight: 500; }
+    tr + tr td { border-top: 1px solid #f1f5f9; }
+    .subtotal-row td {
+      font-weight: 700;
+      color: #1e293b;
+      border-top: 2px solid #e2e8f0 !important;
+      padding-top: 10px;
+      margin-top: 4px;
+    }
+    .deduction-amount { color: #dc2626; }
+    .positive-amount { color: #16a34a; }
+
+    /* ── Employer contributions ──────────────────────────────────────────── */
+    .employer-section {
+      background: #fafafa;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 12px 16px;
+      margin-bottom: 20px;
+    }
+    .employer-section h3 {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #64748b;
+      margin-bottom: 10px;
+    }
+    .employer-section table td { font-size: 11.5px; }
+
+    /* ── Net pay banner ──────────────────────────────────────────────────── */
+    .net-pay-banner {
+      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+      border-radius: 10px;
+      padding: 20px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .net-pay-banner .label {
+      font-size: 14px;
+      font-weight: 600;
+      color: rgba(255,255,255,0.85);
+    }
+    .net-pay-banner .amount {
+      font-size: 28px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: -0.5px;
+    }
+    .net-pay-banner .words {
+      font-size: 11px;
+      color: rgba(255,255,255,0.7);
+      margin-top: 4px;
+    }
+    .net-pay-banner .ctc-block { text-align: right; }
+    .net-pay-banner .ctc-label {
+      font-size: 11px;
+      color: rgba(255,255,255,0.65);
+    }
+    .net-pay-banner .ctc-amount {
+      font-size: 16px;
+      font-weight: 700;
+      color: rgba(255,255,255,0.9);
+    }
+
+    /* ── Attendance summary ──────────────────────────────────────────────── */
+    .attendance-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .att-chip {
+      flex: 1;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      text-align: center;
+    }
+    .att-chip .att-value {
+      font-size: 20px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .att-chip .att-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    /* ── Footer ─────────────────────────────────────────────────────────── */
+    .footer {
+      border-top: 1px solid #e2e8f0;
+      padding-top: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+    .footer .compliance-note { max-width: 55%; line-height: 1.6; }
+    .footer .generated-note { text-align: right; line-height: 1.6; }
+    .footer strong { color: #64748b; }
+  </style>
+</head>
+<body>
+
+  <!-- ── Company header ────────────────────────────────────────────────── -->
+  <div class="header">
+    <div class="company-block">
+      <h1>{{ company.name }}</h1>
+      <p>
+        {% if company.address %}{{ company.address }}<br>{% endif %}
+        {% if company.gstin %}GSTIN: {{ company.gstin }}{% endif %}
+        {% if company.owner_phone %}{% if company.gstin %} &nbsp;|&nbsp; {% endif %}Phone: {{ company.owner_phone }}{% endif %}
+      </p>
+    </div>
+    <div class="payslip-badge">
+      <div class="label">Payslip</div>
+      <div class="period">{{ month_name }} {{ year }}</div>
+      <div class="run-info">Run ID: {{ run_id_short }}</div>
+    </div>
+  </div>
+
+  <!-- ── Employee info ─────────────────────────────────────────────────── -->
+  <div class="employee-card">
+    <div class="info-group">
+      <div class="field-label">Employee Name</div>
+      <div class="field-value">{{ employee.name }}</div>
+    </div>
+    <div class="info-group">
+      <div class="field-label">Designation</div>
+      <div class="field-value">{{ employee.role or '—' }}</div>
+    </div>
+    <div class="info-group">
+      <div class="field-label">State</div>
+      <div class="field-value">{{ company.state }}</div>
+    </div>
+    {% if employee.pf_account %}
+    <div class="info-group">
+      <div class="field-label">PF Account</div>
+      <div class="field-value">{{ employee.pf_account }}</div>
+    </div>
+    {% endif %}
+    {% if employee.bank_account %}
+    <div class="info-group">
+      <div class="field-label">Bank A/C</div>
+      <div class="field-value">{{ employee.bank_account }}</div>
+    </div>
+    {% endif %}
+    {% if employee.bank_ifsc %}
+    <div class="info-group">
+      <div class="field-label">IFSC</div>
+      <div class="field-value">{{ employee.bank_ifsc }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ── Attendance summary chips ──────────────────────────────────────── -->
+  <div class="attendance-row">
+    <div class="att-chip">
+      <div class="att-value">{{ working_days_std }}</div>
+      <div class="att-label">Working Days</div>
+    </div>
+    <div class="att-chip">
+      <div class="att-value">{{ working_days_present }}</div>
+      <div class="att-label">Days Present</div>
+    </div>
+    <div class="att-chip">
+      <div class="att-value">{{ leave_deduction_days }}</div>
+      <div class="att-label">Unpaid Leave</div>
+    </div>
+    <div class="att-chip">
+      <div class="att-value">{{ overtime_hours }}</div>
+      <div class="att-label">OT Hours</div>
+    </div>
+  </div>
+
+  <!-- ── Earnings & Deductions tables ──────────────────────────────────── -->
+  <div class="tables-row">
+
+    <div class="table-block">
+      <h3>Earnings</h3>
+      <table>
+        <tr>
+          <td>Basic Pay</td>
+          <td class="positive-amount">₹{{ item.basic | fmt_inr }}</td>
+        </tr>
+        {% if item.overtime_pay > 0 %}
+        <tr>
+          <td>Overtime Pay ({{ overtime_hours }}h)</td>
+          <td class="positive-amount">₹{{ item.overtime_pay | fmt_inr }}</td>
+        </tr>
+        {% endif %}
+        {% if item.festival_bonus > 0 %}
+        <tr>
+          <td>Festival Bonus (8.33%)</td>
+          <td class="positive-amount">₹{{ item.festival_bonus | fmt_inr }}</td>
+        </tr>
+        {% endif %}
+        {% if item.leave_deduction > 0 %}
+        <tr>
+          <td>Leave Deduction</td>
+          <td class="deduction-amount">− ₹{{ item.leave_deduction | fmt_inr }}</td>
+        </tr>
+        {% endif %}
+        <tr class="subtotal-row">
+          <td>Gross Pay</td>
+          <td>₹{{ item.gross | fmt_inr }}</td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="table-block">
+      <h3>Deductions</h3>
+      <table>
+        {% if item.pf_employee > 0 %}
+        <tr>
+          <td>Provident Fund (12%)</td>
+          <td class="deduction-amount">₹{{ item.pf_employee | fmt_inr }}</td>
+        </tr>
+        {% endif %}
+        {% if item.esic_employee > 0 %}
+        <tr>
+          <td>ESIC (0.75%)</td>
+          <td class="deduction-amount">₹{{ item.esic_employee | fmt_inr }}</td>
+        </tr>
+        {% endif %}
+        {% if item.professional_tax > 0 %}
+        <tr>
+          <td>Professional Tax</td>
+          <td class="deduction-amount">₹{{ item.professional_tax | fmt_inr }}</td>
+        </tr>
+        {% endif %}
+        {% if item.total_deductions == 0 %}
+        <tr>
+          <td colspan="2" style="color:#94a3b8; font-style:italic;">No deductions applicable</td>
+        </tr>
+        {% endif %}
+        <tr class="subtotal-row">
+          <td>Total Deductions</td>
+          <td class="deduction-amount">₹{{ item.total_deductions | fmt_inr }}</td>
+        </tr>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- ── Employer contributions ─────────────────────────────────────────── -->
+  {% if (snapshot.employer_pf or 0) > 0 or (snapshot.employer_esic or 0) > 0 %}
+  <div class="employer-section">
+    <h3>Employer Contributions (not deducted from your pay)</h3>
+    <table>
+      <tr>
+        {% if (snapshot.employer_pf or 0) > 0 %}
+        <td style="width:50%">Employer PF (12%)</td>
+        <td style="width:25%; text-align:right">₹{{ snapshot.employer_pf | fmt_inr }}</td>
+        {% endif %}
+        {% if (snapshot.employer_esic or 0) > 0 %}
+        <td style="width:50%">Employer ESIC (3.25%)</td>
+        <td style="width:25%; text-align:right">₹{{ snapshot.employer_esic | fmt_inr }}</td>
+        {% endif %}
+      </tr>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- ── Net pay banner ────────────────────────────────────────────────── -->
+  <div class="net-pay-banner">
+    <div>
+      <div class="label">Net Pay (Take-Home)</div>
+      <div class="amount">₹{{ item.net_pay | fmt_inr }}</div>
+      <div class="words">{{ net_pay_words }}</div>
+    </div>
+    <div class="ctc-block">
+      <div class="ctc-label">Cost to Company</div>
+      <div class="ctc-amount">₹{{ snapshot.cost_to_company | fmt_inr }}</div>
+    </div>
+  </div>
+
+  <!-- ── Footer ────────────────────────────────────────────────────────── -->
+  <div class="footer">
+    <div class="compliance-note">
+      <strong>Compliance Note:</strong> PF deducted at 12% of basic salary
+      (wage ceiling ₹15,000). ESIC applicable if gross ≤ ₹21,000/month at 0.75% (employee)
+      + 3.25% (employer). Professional Tax as per {{ company.state }} slab.
+      This payslip is computer-generated and does not require a signature.
+    </div>
+    <div class="generated-note">
+      Generated by <strong>MicroPayroll</strong><br>
+      {{ generated_at }}<br>
+      <span style="font-size:9px;">Confidential — For employee use only</span>
+    </div>
+  </div>
+
+</body>
+</html>

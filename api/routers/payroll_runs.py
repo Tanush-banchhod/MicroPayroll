@@ -1,4 +1,4 @@
-"""Payroll runs router — create draft run, list runs, approve a run.
+"""Payroll runs router — create draft run, list runs, approve, payslip PDF, bank CSV.
 
 When a run is created, the engine reads attendance data from the DB for the
 given month/year, calculates salary for every active employee, and persists
@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +19,8 @@ from api.models.company import Company
 from api.models.employee import Employee
 from api.models.payroll import PayrollLineItem, PayrollRun, PayrollRunStatus
 from api.schemas.payroll_run import PayrollRunCreate, PayrollRunDetail, PayrollRunResponse
+from api.services.pdf import render_payslip_pdf
+from api.services.bank_export import build_bank_csv
 from engine.compliance.india import load_rules
 from engine.salary import EmployeeInput, calculate
 
@@ -224,3 +227,116 @@ async def approve_payroll_run(
     await db.commit()
     await db.refresh(run)
     return PayrollRunResponse.model_validate(run)
+
+
+@router.get(
+    "/{run_id}/payslip/{employee_id}",
+    summary="Download payslip PDF for one employee",
+    description=(
+        "Generates a professional payslip PDF for the given employee in the given "
+        "payroll run. Returns a PDF file as a streaming download."
+    ),
+    responses={200: {"content": {"application/pdf": {}}}},
+)
+async def get_payslip_pdf(
+    run_id: uuid.UUID,
+    employee_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    run = await _get_run_or_404(run_id, db)
+
+    # Load company
+    comp_result = await db.execute(select(Company).where(Company.id == run.company_id))
+    company = comp_result.scalar_one_or_none()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Company not found")
+
+    # Load employee
+    emp_result = await db.execute(select(Employee).where(Employee.id == employee_id))
+    employee = emp_result.scalar_one_or_none()
+    if not employee:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Employee not found")
+
+    # Load line item for this employee in this run
+    item_result = await db.execute(
+        select(PayrollLineItem).where(
+            and_(
+                PayrollLineItem.run_id == run_id,
+                PayrollLineItem.employee_id == employee_id,
+            )
+        )
+    )
+    item = item_result.scalar_one_or_none()
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No payroll line item found for this employee in this run.",
+        )
+
+    pdf_bytes = render_payslip_pdf(
+        company=company,
+        employee=employee,
+        item=item,
+        run_id=str(run_id),
+        month=run.month,
+        year=run.year,
+    )
+
+    import calendar
+    filename = (
+        f"payslip_{employee.name.replace(' ', '_')}_{calendar.month_abbr[run.month]}{run.year}.pdf"
+    )
+    return StreamingResponse(
+        iter([pdf_bytes]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get(
+    "/{run_id}/bank-export",
+    summary="Download NEFT bulk payment CSV for a payroll run",
+    description=(
+        "Generates a bank-ready CSV with one row per employee: "
+        "Name, Account Number, IFSC Code, Net Pay, Remarks. "
+        "Compatible with NEFT bulk upload formats used by major Indian banks."
+    ),
+    responses={200: {"content": {"text/csv": {}}}},
+)
+async def get_bank_export(
+    run_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    run = await _get_run_or_404(run_id, db)
+
+    # Load all line items for the run
+    items_result = await db.execute(
+        select(PayrollLineItem).where(PayrollLineItem.run_id == run_id)
+    )
+    line_items = items_result.scalars().all()
+
+    if not line_items:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No line items found for this payroll run.",
+        )
+
+    # Load all relevant employees in one query
+    emp_ids = [item.employee_id for item in line_items]
+    emps_result = await db.execute(select(Employee).where(Employee.id.in_(emp_ids)))
+    employees_by_id = {str(emp.id): emp for emp in emps_result.scalars().all()}
+
+    csv_content = build_bank_csv(
+        employees_by_id=employees_by_id,
+        line_items=line_items,
+        month=run.month,
+        year=run.year,
+    )
+
+    import calendar
+    filename = f"bank_transfer_{calendar.month_abbr[run.month]}{run.year}.csv"
+    return StreamingResponse(
+        iter([csv_content.encode("utf-8")]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
